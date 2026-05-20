@@ -49,9 +49,13 @@ async function startBot() {
 
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
     if (qr) {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
       console.log('\n╔══════════════════════════════════════╗');
       console.log('║    ESCANEA EL QR CON TU WHATSAPP     ║');
-      console.log('╚══════════════════════════════════════╝\n');
+      console.log('╚══════════════════════════════════════╝');
+      console.log('📱 Abre este enlace en tu celular:');
+      console.log(qrUrl);
+      console.log('   (o escanea el código QR de arriba)\n');
     }
     if (connection === 'open') {
       console.log('\n╔══════════════════════════════════════╗');
