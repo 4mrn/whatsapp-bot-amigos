@@ -25,6 +25,7 @@ const AI_BACKEND = process.env.AI_BACKEND || 'ollama';
 const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3';
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
+const BOT_PHONE = process.env.BOT_PHONE || '';
 
 let ollamaClient = null;
 let geminiModel = null;
@@ -81,15 +82,31 @@ async function startBot() {
 
   sock.ev.on('creds.update', saveCreds);
 
+  let pairingRequested = false;
+
   sock.ev.on('connection.update', async ({ connection, lastDisconnect, qr }) => {
-    if (qr) {
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
-      console.log('\n╔══════════════════════════════════════╗');
-      console.log('║    ESCANEA EL QR CON TU WHATSAPP     ║');
-      console.log('╚══════════════════════════════════════╝');
-      console.log('📱 Abre este enlace en tu celular:');
-      console.log(qrUrl);
-      console.log('   (o escanea el código QR de arriba)\n');
+    if (qr && !pairingRequested) {
+      if (BOT_PHONE) {
+        pairingRequested = true;
+        try {
+          const code = await sock.requestPairingCode(BOT_PHONE);
+          console.log('\n╔══════════════════════════════════════╗');
+          console.log('║   CÓDIGO DE EMPAREJAMIENTO          ║');
+          console.log('╚══════════════════════════════════════╝');
+          console.log(`📱 Código: ${code}`);
+          console.log('   Abre WhatsApp > Ajustes > Dispositivos vinculados\n');
+        } catch (e) {
+          console.log('⚠️ Error con código de emparejamiento');
+        }
+      } else {
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(qr)}`;
+        console.log('\n╔══════════════════════════════════════╗');
+        console.log('║    ESCANEA EL QR CON TU WHATSAPP     ║');
+        console.log('╚══════════════════════════════════════╝');
+        console.log('📱 Abre este enlace en tu celular:');
+        console.log(qrUrl);
+        console.log('   (o escanea el código QR de arriba)\n');
+      }
     }
     if (connection === 'open') {
       console.log('\n╔══════════════════════════════════════╗');
