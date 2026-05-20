@@ -9,11 +9,45 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const pino = require('pino');
+const http = require('http');
+const { Ollama } = require('ollama');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const translate = require('@vitalets/google-translate-api');
+require('dotenv').config();
 
 const PREFIX = '!';
 const AUDIO_DIR = path.join(__dirname, 'audios');
 const AUTH_DIR = path.join(__dirname, 'auth');
 if (!fs.existsSync(AUDIO_DIR)) fs.mkdirSync(AUDIO_DIR);
+
+// === CONFIGURACIÓN DE IA ===
+const AI_BACKEND = process.env.AI_BACKEND || 'ollama';
+const OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://localhost:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3';
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+
+let ollamaClient = null;
+let geminiModel = null;
+
+if (AI_BACKEND === 'ollama') {
+  try {
+    ollamaClient = new Ollama({ host: OLLAMA_HOST });
+    console.log('✅ Cliente Ollama listo');
+  } catch (e) {
+    console.log('⚠️ Ollama no disponible');
+    ollamaClient = null;
+  }
+}
+
+if (GEMINI_KEY) {
+  try {
+    geminiModel = new GoogleGenerativeAI(GEMINI_KEY).getGenerativeModel({ model: 'gemini-pro' });
+    console.log('✅ Cliente Gemini listo');
+  } catch (e) {
+    console.log('⚠️ Error iniciando Gemini');
+  }
+}
+// ========================
 
 process.on('uncaughtException', (err) => console.error('Error crítico:', err.message));
 process.on('unhandledRejection', (err) => console.error('Promesa rechazada:', err.message));
@@ -131,6 +165,20 @@ async function startBot() {
         case '8ball':
           await send8ball(sock, chatId, msg, args);
           break;
+        case 'ai':
+        case 'chat':
+        case 'pregunta':
+          await sendAI(sock, chatId, msg, args);
+          break;
+        case 'img':
+        case 'imagen':
+        case 'image':
+          await sendImage(sock, chatId, args);
+          break;
+        case 'traducir':
+        case 'translate':
+          await sendTranslate(sock, chatId, msg, args);
+          break;
         default:
           await sock.sendMessage(chatId, { text: `❌ Comando "${command}" no encontrado. Usa *!menu*` }, { quoted: msg });
       }
@@ -162,6 +210,9 @@ async function startBot() {
 async function sendHelp(sock, chatId, msg) {
   const text = `🤖 *BOT AMIGOS - Comandos*
 
+🧠 *!ai <mensaje>* - Chatea con la IA
+🖼 *!img <descripción>* - Crea una imagen con IA
+🌍 *!traducir <texto>* - Traduce texto a español
 🎵 *!play <nombre>* - Busca y reproduce música
 🎲 *!dado* - Lanza un dado (1-6)
 🪙 *!moneda* - Cara o cruz
@@ -351,5 +402,108 @@ function formatDuration(seconds) {
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
+
+// === IA: Chat ===
+async function sendAI(sock, chatId, msg, args) {
+  if (!args.length) {
+    return sock.sendMessage(chatId, {
+      text: '🧠 Usa: *!ai <tu mensaje>*\nEjemplo: !ai Dime un chiste',
+    }, { quoted: msg });
+  }
+
+  const prompt = args.join(' ');
+  await sock.sendMessage(chatId, { text: '🧠 Pensando...' }, { quoted: msg });
+
+  try {
+    if (ollamaClient) {
+      const response = await ollamaClient.chat({
+        model: OLLAMA_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      return sock.sendMessage(chatId, { text: `🧠 *IA:*\n${response.message.content}` }, { quoted: msg });
+    }
+
+    if (geminiModel) {
+      const result = await geminiModel.generateContent(prompt);
+      const text = result.response.text();
+      return sock.sendMessage(chatId, { text: `🧠 *Gemini:*\n${text}` }, { quoted: msg });
+    }
+
+    await sock.sendMessage(chatId, {
+      text: '❌ No hay IA configurada.\n\nPara usar Ollama:\n1. Instala https://ollama.com\n2. Ejecuta: ollama pull llama3\n\nPara usar Gemini:\n1. Ve a https://aistudio.google.com/app/apikey\n2. Pon tu API key en el archivo .env',
+    }, { quoted: msg });
+  } catch (err) {
+    console.error('AI error:', err);
+    await sock.sendMessage(chatId, {
+      text: `❌ Error de IA: ${err.message}`,
+    }, { quoted: msg });
+  }
+}
+
+// === IA: Generar imágenes ===
+async function sendImage(sock, chatId, args) {
+  if (!args.length) {
+    return sock.sendMessage(chatId, {
+      text: '🖼 Usa: *!img <descripción>*\nEjemplo: !img un perro astronauta en el espacio',
+    });
+  }
+
+  const prompt = args.join(' ');
+  await sock.sendMessage(chatId, { text: '🎨 Generando imagen...' });
+
+  try {
+    const imgUrl = `https://pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&model=flux`;
+    const res = await axios.get(imgUrl, { responseType: 'arraybuffer' });
+    await sock.sendMessage(chatId, {
+      image: res.data,
+      caption: `🖼 *${prompt}*`,
+    });
+  } catch (err) {
+    console.error('Image error:', err);
+    await sock.sendMessage(chatId, {
+      text: '❌ Error generando imagen. Intenta de nuevo.',
+    });
+  }
+}
+
+// === Traducción ===
+async function sendTranslate(sock, chatId, msg, args) {
+  if (!args.length) {
+    return sock.sendMessage(chatId, {
+      text: '🌍 Usa: *!traducir <texto a traducir>*\nEjemplo: !traducir Hello, how are you?\n\nTambién: !traducir es|Hello (especificando idioma)',
+    }, { quoted: msg });
+  }
+
+  let targetLang = 'es';
+  let textToTranslate = args.join(' ');
+
+  if (args[0].includes('|')) {
+    const parts = textToTranslate.split('|');
+    targetLang = parts[0].trim();
+    textToTranslate = parts.slice(1).join('|').trim();
+  }
+
+  await sock.sendMessage(chatId, { text: '🌍 Traduciendo...' }, { quoted: msg });
+
+  try {
+    const result = await translate(textToTranslate, { to: targetLang });
+    await sock.sendMessage(chatId, {
+      text: `🌍 *Traducción (${targetLang}):*\n${result.text}`,
+    }, { quoted: msg });
+  } catch (err) {
+    console.error('Translate error:', err);
+    await sock.sendMessage(chatId, {
+      text: '❌ Error al traducir.',
+    }, { quoted: msg });
+  }
+}
+
+const PORT = process.env.PORT || 8080;
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Bot WhatsApp activo ✅');
+}).listen(PORT, () => {
+  console.log(`Health check server en puerto ${PORT}`);
+});
 
 startBot();

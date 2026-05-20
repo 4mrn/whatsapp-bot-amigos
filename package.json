@@ -8,8 +8,12 @@
   },
   "dependencies": {
     "@distube/ytdl-core": "^4.14.4",
+    "@google/generative-ai": "^0.24.1",
+    "@vitalets/google-translate-api": "^9.2.1",
     "@whiskeysockets/baileys": "^7.0.0-rc11",
     "axios": "^1.7.9",
+    "dotenv": "^17.4.2",
+    "ollama": "^0.6.3",
     "pino": "^10.3.1",
     "yt-search": "^2.12.1"
   }
